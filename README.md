@@ -36,12 +36,12 @@ Par exemple, les 100 premières interactions protéine-protéine humaines dispon
 
 Numero de champ | Signification Biologique|
  --- | --- 
-1 | 
-2 |
-3 |
-4 |
-5 |
-6 |
+1 | Unique identifier for interactor A (uniprot)
+2 | Unique identifier for interactor B (uniprot)
+3 | Alternative identifier for interactor A
+4 | Alternative identifier for interactor B
+5 | Aliases for A
+6 | Aliases for B
 
 ##### Utiliser le PMID de la publication pour récuperer les lignes MITAB des interactions rapportées dans l'étude.
 Une librairie pratique pour manipuler des requêtes HTTP est [requests](https://requests.readthedocs.io/en/master/), eg:
@@ -56,11 +56,30 @@ except NameError:
     httpReq = requests.get(url)
 ans = httpReq.text
 ```
+Recuperation des données MITAB de Calderwood et al.
+```
+import requests
+
+paicquicProviderURL="http://www.ebi.ac.uk/Tools/webservices/paicquic/intact/webservices/current/search"
+miqlMethod="query"
+miqlField="pubid"
+miqlValue="17446270"
+
+miqlRequest= f"{paicquicProviderURL}/{miqlMethod}/{miqlField}:{miqlValue}"
+print(miqlRequest)
+
+try:
+    httpReq = requests.get(miqlRequest)
+except NameError:
+    httpReq = requests.get(miqlRequest)
+ans=httpReq.text
+```
 
 ##### Quelles techniques experimentales mesurent les interactions rapportées dans cette publication?
 
 ```
-
+psi-mi:"MI:0915"(physical association)
+La technique mesurant les interractions rapportées dans la publi est la technique de Two Hybrid.
 ```
 
 #### Extraction des deux sous-jeux d'interactions
@@ -113,18 +132,76 @@ print(f"Nombre total d'interactions {total}, EBV-EBV {len(EBV_EBV_mitab)}")
 
 ##### Que fait la fonction `mitabReader` ?
 ```
+mitabReader permet d'extraire les numeros Uniprot
 ```
 
 ##### Après avoir réparé ce code veuillez
-- Extraire les lignes MITAB impliquant uniquement des protéines d'EBV, quel est leur nombre ?
+- Extraire les lignes MITAB impliquant uniquement des protéines d'EBV, quel est leur nombre ? 
+```
+print(f"Nombre total d'interactions {total}, EBV-EBV {len(EBV_EBV_mitab)}")
+```
 - Extraire les lignes MITAB impliquant des protéines humaines et des protéines d'EBV, quel est leur nombre ?
 ```
+print(f"Nombre d'interractions Human_EBV : {len(EBV_Human_mitab)}")
+```
+
+```
+import re
+
+def mitabReader(httpText):
+    for line in ans.split("\n"):
+        _ = line.split("\t")
+        if len(_) > 1 and _[0].startswith("uniprotkb:")\
+                      and _[1].startswith("uniprotkb:"):
+            yield [ _[0].replace("uniprotkb:", ""),\
+                    _[1].replace("uniprotkb:", "") ]\
+                  + _[2:]
+                
+            
+def isMitab_EBV_EBV(mitabArray):
+    reEBV = "taxid:(1037[6-7]|82830)"
+    if re.search(reEBV, mitabArray[9]) and re.search(reEBV, mitabArray[10]):
+        return True
+    return False
+
+def isMitab_Human_EBV(mitabLine):
+    reHuman = "taxid:9606"
+    reEBV = "taxid:(1037[6-7]|82830)"
+    if re.search(reEBV, mitabArray[9]) and re.search(reHuman,mitabArray[10]) or re.search(reHuman, mitabArray[9]) and re.search(reEBV,mitabArray[10]):
+        return True
+    return False
+
+
+EBV_EBV_mitab   = []
+EBV_Human_mitab = []
+total = 0
+for mitabArray in mitabReader(ans):
+    total += 1
+    if isMitab_EBV_EBV(mitabArray):
+        EBV_EBV_mitab.append(mitabArray)
+    elif isMitab_Human_EBV(mitabArray):
+        EBV_Human_mitab.append(mitabArray)
+    else : 
+        raise ValueError("Je ne connais pas cette espece ==> ", mitabArray[9:11])
+
+print(f"Nombre total d'interactions {total}, EBV-EBV {len(EBV_EBV_mitab)}")
 ```
 
 ##### Combien de protéines humaines et virales sont respectivement dans les jeux d'interactions EBV-Human et EBV-EBV ?
 
 ```
-
+ebv_prot = set()
+for data in EBV_EBV_mitab:
+    ebv_prot.add(data[0])
+    ebv_prot.add(data[1])
+print(f"{len(ebv_prot)} EBV protein")
+    
+human_prot = set()
+for data in EBV_Human_mitab:
+    human_prot.add(data[0])
+    human_prot.add(data[1])
+human_prot = human_prot - ebv_prot
+print(f"{len(human_prot)} Human protein")
 ```
 
 ###### Pour la suite du travail assurez-vous d'avoir les deux jeux de données MITAB suivants
@@ -148,7 +225,17 @@ A l'aide des données MITAB et de la librarie [networkx](https://networkx.github
 ##### Décrivez brièvement ce réseau
 
 ```
+import networkx as nx
+import re
+G = nx.Graph()
 
+for psqDatum in EBV_EBV_mitab:
+    G.add_edge(psqDatum[0], psqDatum[1])
+    
+import matplotlib.pyplot as plt
+plt.figure(figsize=(10,8))
+nx.draw(G, with_labels=True, node_size=3, font_size=8, linewidths=2)
+plt.show()
 ```
 
 Les noms de gènes sont parfois plus parlants que des accesseurs UNIPROT. A l'aide du fichier `./data/Calderwood_EBV_proteome.xml`  créez une table de conversion entre accesseur UNIPROT et nom de gène.
@@ -208,6 +295,17 @@ Vous pouvez desormais dessiner le réseau dans lequel:
 - les arêtes relient deux protéines en interaction
 - les noeuds sont les noms des gènes correspondant aux protéines.
 
+```plt.figure(figsize=(10,8))
+plt.axis('off')
+
+pos=nx.spring_layout(G)
+
+nx.draw_networkx_nodes(G,pos,node_size=5,node_color="blue")
+nx.draw_networkx_labels(G,pos,EBV_EBV_geneLabels,font_size=10,font_weight=400,font_color='r')
+nx.draw_networkx_edges(G,pos,width=0.3)
+plt.show()
+```
+
 ![Graphique](ebv_ebv_network_gene.png)
 
 ### Caractérisation des cibles protéiques du virus
@@ -224,11 +322,45 @@ Vous pouvez jouer sur la taille de la figure et la constante de ressort *k* du r
 
 ![Graphique](ebv_human_network_gene.png)
 
+```G2 = nx.Graph()
+humanGeneLabels = {}
+ebvGeneLabels = {}
+reHuman = "taxid:9606"
 
+for psqDatum in EBV_Human_mitab:
+    (a, b) = (psqDatum[0],psqDatum[1])
+    G2.add_edge(a,b)
+    (a,b) = (a,b) if re.search(reHuman,psqDatum[9]) else (b,a)
+    humanGeneLabels[a]=None
+    ebvGeneLabels[b]=None
 
+tree = parse('./data/Calderwood_Human_proteome.xml')
+root = tree.getroot()
+for humanID in humanGeneLabels.keys():
+    pDict = proteinDict(humanID,root)
+    humanGeneLabels[humanID] = pDict["geneName"] if pDict["geneName"] else humanID
+    
+tree = parse('./data/Calderwood_EBV_proteome.xml')
+root = tree.getroot()
+for ebvID in ebvGeneLabels.keys():
+    pDict = proteinDict(ebvID,root)
+    ebvGeneLabels[ebvID] = pDict["geneName"] if pDict["geneName"] else ebvID
+```
 
+```
+plt.figure(figsize=(15,15))
+plt.axis('off')
 
+#pos=nx.draw(G,with_labels=False)
+pos=nx.spring_layout(G2,k=0.225)
 
+nx.draw_networkx_nodes(G2,pos,node_size=8,node_color="blue",node_shape="s",nodelist=humanGeneLabels.keys())
+nx.draw_networkx_nodes(G2,pos,node_size=8,node_color="red",node_shape="o",nodelist=humanGeneLabels.keys())
+nx.draw_networkx_labels(G2,pos,humanGeneLabels,font_size=10,font_weight=800, font_color='black')
+nx.draw_networkx_edges(G2,pos,width=0.5)
+
+plt.show()
+```
 
 
 ## Analyse des interactions entre protéines humaines avec STRING
@@ -236,6 +368,7 @@ Vous pouvez jouer sur la taille de la figure et la constante de ressort *k* du r
 Maintenant que vous avez pu visualiser le réseau des interactions physiques virus/homme, vous allez utiliser la ressource STRING pour visualiser les interactions entre les protéines humaines ciblées par le virus.
 
 Comme décrit dans la publication, 173 interactions virus/homme ont été observées, impliquant 112 protéines humaines.
+
 
 
 ### Representation des interactions avec STRING
